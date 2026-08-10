@@ -456,7 +456,7 @@ export default function LaunchpadView({ onComingSoon }) {
                   className="w-full rounded-xl bg-bg-panel card-border px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none"
                 />
                 <p className="mt-1.5 text-[11px] leading-snug text-white/40">
-                  There's no on-chain price quote for the bonding curve yet, so this can't be
+                  There&apos;s no on-chain price quote for the bonding curve yet, so this can&apos;t be
                   calculated for you from a slippage %. Leaving it at 0 means your initial buy
                   accepts any output amount — set it manually if you want protection.
                 </p>
