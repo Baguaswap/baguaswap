@@ -43,6 +43,11 @@ export default function Header({ onOpenMenu, onComingSoon }) {
         </div>
 
         <div className="flex items-center gap-1.5">
+          <span className="flex items-center gap-1 rounded-full border border-accent-gold/40 bg-accent-gold/10 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-accent-gold">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent-gold" />
+            Testnet
+          </span>
+
           {address ? (
             <button
               onClick={() => setWalletPanelOpen(true)}
