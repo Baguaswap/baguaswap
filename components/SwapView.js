@@ -28,7 +28,10 @@ export default function SwapView({ onComingSoon }) {
 
   const [direction, setDirection] = useState("buy");
   const [amount, setAmount] = useState("");
-  const [slippage] = useState(0.5);
+  const [slippage, setSlippage] = useState(0.5);
+  const [editingSlippage, setEditingSlippage] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [minOutManual, setMinOutManual] = useState("");
   const [tokenBalance, setTokenBalance] = useState(null);
   const [tokenSymbol, setTokenSymbol] = useState("BAGUA");
   const [tokenDecimals, setTokenDecimals] = useState(18);
@@ -80,6 +83,7 @@ export default function SwapView({ onComingSoon }) {
   const flipDirection = () => {
     setDirection((d) => (d === "buy" ? "sell" : "buy"));
     setAmount("");
+    setMinOutManual("");
     setTxError(null);
     setTxHash(null);
   };
@@ -99,9 +103,16 @@ export default function SwapView({ onComingSoon }) {
       const signer = await provider.getSigner();
       const amms = new Contract(AMMS_ADDRESS, AMMS_ABI, signer);
 
+      // There's no on-chain quote (getAmountOut) function for the bonding
+      // curve yet, so the slippage % above is informational only — it can't
+      // be turned into an exact minOut without a price formula. If the
+      // person filled in the advanced manual field, we use that as the real
+      // protection; otherwise minOut is 0 (unprotected) — see the warning
+      // shown in the Advanced section below.
       let tx;
       if (direction === "buy") {
-        tx = await amms.buyToken(TOKEN_ADDRESS, { value: parseEther(amount) });
+        const minTokensOut = minOutManual.trim() ? parseUnits(minOutManual.trim(), tokenDecimals) : 0n;
+        tx = await amms.buyToken(TOKEN_ADDRESS, minTokensOut, { value: parseEther(amount) });
       } else {
         const token = new Contract(TOKEN_ADDRESS, ERC20_ABI, signer);
         const amountWei = parseUnits(amount, tokenDecimals);
@@ -110,12 +121,14 @@ export default function SwapView({ onComingSoon }) {
           const approveTx = await token.approve(AMMS_ADDRESS, amountWei);
           await approveTx.wait();
         }
-        tx = await amms.sellToken(TOKEN_ADDRESS, amountWei);
+        const minEthOut = minOutManual.trim() ? parseEther(minOutManual.trim()) : 0n;
+        tx = await amms.sellToken(TOKEN_ADDRESS, amountWei, minEthOut);
       }
 
       const receipt = await tx.wait();
       setTxHash(receipt.hash);
       setAmount("");
+      setMinOutManual("");
       loadTokenInfo();
     } catch (err) {
       setTxError(err?.shortMessage || err?.reason || err?.message || "Swap failed. Please try again.");
@@ -243,17 +256,63 @@ export default function SwapView({ onComingSoon }) {
         </div>
         <div className="flex items-center justify-between text-white/50">
           <span>Slippage Tolerance</span>
-          <span className="flex items-center gap-1 text-accent-purple">
-            {slippage}%
-            <button onClick={() => onComingSoon("Custom Slippage")} aria-label="Edit slippage">
+          {editingSlippage ? (
+            <span className="flex items-center gap-1">
+              <input
+                autoFocus
+                value={slippage}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^0-9.]/g, "");
+                  setSlippage(v);
+                }}
+                onBlur={() => setEditingSlippage(false)}
+                onKeyDown={(e) => e.key === "Enter" && setEditingSlippage(false)}
+                inputMode="decimal"
+                className="w-14 rounded-md bg-bg-card card-border px-1.5 py-0.5 text-right text-accent-purple outline-none"
+              />
+              <span className="text-accent-purple">%</span>
+            </span>
+          ) : (
+            <button
+              onClick={() => setEditingSlippage(true)}
+              className="flex items-center gap-1 text-accent-purple"
+              aria-label="Edit slippage"
+            >
+              {slippage}%
               <EditIcon />
             </button>
-          </span>
+          )}
         </div>
         <div className="flex items-center justify-between text-white/50">
           <span>Minimum Received</span>
-          <span className="text-white/70">Determined at execution</span>
+          <span className="text-white/70">
+            {minOutManual.trim() ? `${minOutManual} ${toLabel} (manual)` : "Not enforced — set below"}
+          </span>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="flex w-full items-center justify-between pt-1 text-xs text-white/40"
+        >
+          <span>Advanced: set minimum received manually</span>
+          <ChevronDownIcon width="14" height="14" className={`transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
+        </button>
+        {showAdvanced && (
+          <div className="pt-1">
+            <input
+              value={minOutManual}
+              onChange={(e) => setMinOutManual(e.target.value)}
+              inputMode="decimal"
+              placeholder={`0.0 ${toLabel}`}
+              className="w-full rounded-xl bg-bg-card card-border px-3 py-2 text-sm text-white placeholder-white/30 outline-none"
+            />
+            <p className="mt-1.5 text-[11px] leading-snug text-white/40">
+              There's no on-chain price quote for the bonding curve yet, so the % above can't be
+              auto-converted into an exact minimum. Leave this blank to accept any output amount
+              (no slippage protection), or enter the minimum {toLabel} you're willing to accept.
+            </p>
+          </div>
+        )}
       </div>
 
       {txError && (
