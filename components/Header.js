@@ -1,15 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { MenuIcon, BellIcon, ChevronDownIcon, WalletIcon, EthIcon, CHAIN_ICON_MAP, CloseIcon } from "@/components/icons";
+import { MenuIcon, BellIcon, ChevronDownIcon, WalletIcon, CloseIcon } from "@/components/icons";
 import { useWallet } from "@/lib/WalletProvider";
 import { formatBalance, formatUsd } from "@/lib/format";
-import NetworkSelectModal from "@/components/NetworkSelectModal";
 import WalletConnectModal from "@/components/WalletConnectModal";
 import WalletPanelModal from "@/components/WalletPanelModal";
 
 export default function Header({ onOpenMenu, onComingSoon }) {
-  const [networkModalOpen, setNetworkModalOpen] = useState(false);
   const [walletConnectModalOpen, setWalletConnectModalOpen] = useState(false);
   const [walletPanelOpen, setWalletPanelOpen] = useState(false);
   const {
@@ -24,11 +22,6 @@ export default function Header({ onOpenMenu, onComingSoon }) {
     clearError,
     selectedNetwork,
   } = useWallet();
-
-  const handleSelectNetwork = (network) => {
-    setNetworkModalOpen(false);
-    connect(network);
-  };
 
   const handleSelectWallet = () => {
     setWalletConnectModalOpen(false);
@@ -50,22 +43,6 @@ export default function Header({ onOpenMenu, onComingSoon }) {
         </div>
 
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => setNetworkModalOpen(true)}
-            className="flex items-center gap-1 rounded-full bg-bg-card card-border px-2.5 py-1.5 text-xs text-white/90"
-          >
-            {selectedNetwork.iconUrl ? (
-              <img src={selectedNetwork.iconUrl} alt="" className="h-3.5 w-3.5 rounded-full" />
-            ) : (
-              (() => {
-                const ChainIcon = CHAIN_ICON_MAP[selectedNetwork.icon] || EthIcon;
-                return <ChainIcon width="14" height="14" />;
-              })()
-            )}
-            {selectedNetwork.name}
-            <ChevronDownIcon width="14" height="14" />
-          </button>
-
           {address ? (
             <button
               onClick={() => setWalletPanelOpen(true)}
@@ -102,13 +79,6 @@ export default function Header({ onOpenMenu, onComingSoon }) {
           open={walletConnectModalOpen}
           onClose={() => setWalletConnectModalOpen(false)}
           onSelectWallet={handleSelectWallet}
-        />
-
-        <NetworkSelectModal
-          open={networkModalOpen}
-          onClose={() => setNetworkModalOpen(false)}
-          onSelect={handleSelectNetwork}
-          selectedNetworkId={selectedNetwork.id}
         />
 
         <WalletPanelModal
