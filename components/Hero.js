@@ -36,11 +36,11 @@ export default function Hero({ onLaunchClick, onDocsClick }) {
             <LiveBadge />
 
             <h1 className="mt-3 font-display text-2xl font-bold leading-tight tracking-tight text-white sm:text-4xl">
-              Build Once.
+              The Home of
               <br />
-              <span className="text-accent-gold">Launch</span>
+              <span className="text-accent-gold">Memes</span>
               <br />
-              Anywhere.
+              on Giwa Chain.
             </h1>
 
             <div className="mt-4 flex flex-wrap gap-2">
