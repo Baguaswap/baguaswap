@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
@@ -34,12 +34,6 @@ export default function AppShell({ children }) {
   const [launchMenuOpen, setLaunchMenuOpen] = useState(false);
 
   const activeTab = PATH_TO_LABEL[pathname] ?? "Home";
-
-  useEffect(() => {
-    if (pathname === "/docs") {
-      setComingSoonFeature("Docs");
-    }
-  }, [pathname]);
 
   const handleNavigate = (label) => {
     if (label === "Launchpad") {
