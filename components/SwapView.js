@@ -307,9 +307,9 @@ export default function SwapView({ onComingSoon }) {
               className="w-full rounded-xl bg-bg-card card-border px-3 py-2 text-sm text-white placeholder-white/30 outline-none"
             />
             <p className="mt-1.5 text-[11px] leading-snug text-white/40">
-              There's no on-chain price quote for the bonding curve yet, so the % above can't be
+              There&apos;s no on-chain price quote for the bonding curve yet, so the % above can&apos;t be
               auto-converted into an exact minimum. Leave this blank to accept any output amount
-              (no slippage protection), or enter the minimum {toLabel} you're willing to accept.
+              (no slippage protection), or enter the minimum {toLabel} you&apos;re willing to accept.
             </p>
           </div>
         )}
