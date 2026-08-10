@@ -1,9 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { BrowserProvider, Contract, parseUnits } from "ethers";
+import { BrowserProvider, Contract, parseEther } from "ethers";
 import { useWallet } from "@/lib/WalletProvider";
 import { FACTORY_ABI, FACTORY_ADDRESS, CHAIN_NAME } from "@/lib/config";
+import { uploadImageToIPFS, uploadMetadataToIPFS, cidToUri } from "@/lib/ipfs";
 import {
   RocketIcon,
   FlameIcon,
@@ -14,25 +15,40 @@ import {
   TelegramIcon,
 } from "@/components/icons";
 
-const DEFAULT_SUPPLY = "10000000000";
+// Uploads the logo (and banner, if provided) to IPFS, then builds and
+// uploads the metadata JSON, per LAUNCHPAD_ARCHITECTURE.md sections 3-8.
+// Fields match the documented schema (name, symbol, description, image,
+// website, twitter, telegram) plus "banner" (documented addition).
+//
+// "pairWith" (ETH vs $BAGUA) is intentionally NOT included here: per section
+// 23's on-chain/off-chain split, which asset a curve is paired with is
+// protocol/economic state, not descriptive off-chain metadata. It stays out
+// of the JSON until the contract defines a real on-chain parameter for it —
+// see the "Pair With Bagua" toggle below, which is UI-only for now.
+async function buildMetadataURI({ name, symbol, description, imageFile, bannerFile, website, twitter, telegram }, onProgress) {
+  onProgress?.("Uploading logo to IPFS…");
+  const imageCid = await uploadImageToIPFS(imageFile);
 
-function buildTokenURI(name, symbol, description, imageDataUrl, bannerDataUrl, socials, pairWithBagua) {
+  let bannerUri = null;
+  if (bannerFile) {
+    onProgress?.("Uploading banner to IPFS…");
+    const bannerCid = await uploadImageToIPFS(bannerFile);
+    bannerUri = cidToUri(bannerCid);
+  }
+
+  onProgress?.("Generating and uploading metadata JSON…");
   const metadata = {
     name,
     symbol,
-    description,
-    image: imageDataUrl || null,
-    banner: bannerDataUrl || null,
-    socials: {
-      website: socials.website || null,
-      twitter: socials.twitter || null,
-      telegram: socials.telegram || null,
-    },
-    pairWith: pairWithBagua ? "BAGUA" : "ETH",
+    description: description || undefined,
+    image: cidToUri(imageCid),
+    banner: bannerUri || undefined,
+    website: website || undefined,
+    twitter: twitter || undefined,
+    telegram: telegram || undefined,
   };
-  const json = JSON.stringify(metadata);
-  const base64 = btoa(unescape(encodeURIComponent(json)));
-  return `data:application/json;base64,${base64}`;
+  const metadataCid = await uploadMetadataToIPFS(metadata);
+  return cidToUri(metadataCid);
 }
 
 function ToggleSwitch({ checked, onChange, disabled, label }) {
@@ -65,7 +81,9 @@ export default function LaunchpadView({ onComingSoon }) {
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
   const [description, setDescription] = useState("");
+  const [imageFile, setImageFile] = useState(null);
   const [imageDataUrl, setImageDataUrl] = useState(null);
+  const [bannerFile, setBannerFile] = useState(null);
   const [bannerDataUrl, setBannerDataUrl] = useState(null);
   const [showBanner, setShowBanner] = useState(false);
   const [website, setWebsite] = useState("");
@@ -73,7 +91,11 @@ export default function LaunchpadView({ onComingSoon }) {
   const [telegram, setTelegram] = useState("");
   const [showSocials, setShowSocials] = useState(false);
   const [pairWithBagua, setPairWithBagua] = useState(false);
+  const [showInitialBuy, setShowInitialBuy] = useState(false);
+  const [initialBuyEth, setInitialBuyEth] = useState("");
+  const [minTokensOut, setMinTokensOut] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [statusText, setStatusText] = useState(null);
   const [txError, setTxError] = useState(null);
   const [txHash, setTxHash] = useState(null);
   const fileInputRef = useRef(null);
@@ -82,6 +104,7 @@ export default function LaunchpadView({ onComingSoon }) {
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setImageFile(file);
     const reader = new FileReader();
     reader.onload = () => setImageDataUrl(reader.result);
     reader.readAsDataURL(file);
@@ -90,6 +113,7 @@ export default function LaunchpadView({ onComingSoon }) {
   const handleBannerChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setBannerFile(file);
     const reader = new FileReader();
     reader.onload = () => setBannerDataUrl(reader.result);
     reader.readAsDataURL(file);
@@ -99,12 +123,16 @@ export default function LaunchpadView({ onComingSoon }) {
     setName("");
     setSymbol("");
     setDescription("");
+    setImageFile(null);
     setImageDataUrl(null);
+    setBannerFile(null);
     setBannerDataUrl(null);
     setWebsite("");
     setTwitter("");
     setTelegram("");
     setPairWithBagua(false);
+    setInitialBuyEth("");
+    setMinTokensOut("");
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (bannerInputRef.current) bannerInputRef.current.value = "";
   };
@@ -112,9 +140,15 @@ export default function LaunchpadView({ onComingSoon }) {
   const handleCreate = async () => {
     setTxError(null);
     setTxHash(null);
+    setStatusText(null);
 
     if (!name.trim() || !symbol.trim()) {
       setTxError("Enter a token name and symbol first.");
+      return;
+    }
+
+    if (!imageFile) {
+      setTxError("Upload a token image first — it's required per the metadata spec.");
       return;
     }
 
@@ -125,23 +159,36 @@ export default function LaunchpadView({ onComingSoon }) {
 
     setSubmitting(true);
     try {
+      const metadataURI = await buildMetadataURI(
+        {
+          name: name.trim(),
+          symbol: symbol.trim(),
+          description: description.trim(),
+          imageFile,
+          bannerFile,
+          website: website.trim(),
+          twitter: twitter.trim(),
+          telegram: telegram.trim(),
+        },
+        setStatusText
+      );
+
+      setStatusText("Waiting for wallet confirmation…");
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const factory = new Contract(FACTORY_ADDRESS, FACTORY_ABI, signer);
 
       const fee = await factory.creationFee().catch(() => 0n);
-      const supply = parseUnits(DEFAULT_SUPPLY, 18);
-      const tokenURI = buildTokenURI(
-        name.trim(),
-        symbol.trim(),
-        description.trim(),
-        imageDataUrl,
-        bannerDataUrl,
-        { website: website.trim(), twitter: twitter.trim(), telegram: telegram.trim() },
-        pairWithBagua
-      );
+      const buyWei = initialBuyEth.trim() ? parseEther(initialBuyEth.trim()) : 0n;
+      // No on-chain quote function exists yet for the bonding curve (see
+      // config.js note), so we can't auto-derive minTokensOut from a %
+      // tolerance. An advanced manual value defaults to 0 (no protection).
+      const minOut = minTokensOut.trim() ? BigInt(minTokensOut.trim()) : 0n;
 
-      const tx = await factory.createToken(name.trim(), symbol.trim(), supply, tokenURI, { value: fee });
+      setStatusText("Creating token on-chain…");
+      const tx = await factory.createTokenAndBuy(name.trim(), symbol.trim(), metadataURI, minOut, {
+        value: fee + buyWei,
+      });
       const receipt = await tx.wait();
 
       setTxHash(receipt.hash);
@@ -150,6 +197,7 @@ export default function LaunchpadView({ onComingSoon }) {
       setTxError(err?.shortMessage || err?.reason || err?.message || "Failed to create token. Please try again.");
     } finally {
       setSubmitting(false);
+      setStatusText(null);
     }
   };
 
@@ -164,7 +212,7 @@ export default function LaunchpadView({ onComingSoon }) {
     : !isOnGiwaChain
     ? `Switch to ${CHAIN_NAME}`
     : submitting
-    ? "Creating..."
+    ? statusText || "Creating..."
     : "Create Token";
 
   return (
@@ -366,6 +414,62 @@ export default function LaunchpadView({ onComingSoon }) {
           />
         </div>
 
+        {/* Initial buy (optional) */}
+        <div className="mt-3 rounded-xl bg-bg-card card-border p-3">
+          <button
+            type="button"
+            onClick={() => setShowInitialBuy((v) => !v)}
+            className="flex w-full items-center justify-between text-sm text-white/70"
+          >
+            <span className="flex items-center gap-2">
+              <RocketIcon width="16" height="16" />
+              Buy tokens at launch <span className="text-white/30">(Optional)</span>
+            </span>
+            <ChevronDownIcon
+              width="16"
+              height="16"
+              className={`transition-transform ${showInitialBuy ? "rotate-180" : ""}`}
+            />
+          </button>
+
+          {showInitialBuy && (
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="mb-1.5 block text-xs text-white/50">Initial buy amount (ETH)</label>
+                <input
+                  value={initialBuyEth}
+                  onChange={(e) => setInitialBuyEth(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="0.0"
+                  className="w-full rounded-xl bg-bg-panel card-border px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs text-white/50">
+                  Minimum tokens received (advanced, optional)
+                </label>
+                <input
+                  value={minTokensOut}
+                  onChange={(e) => setMinTokensOut(e.target.value.replace(/[^0-9]/g, ""))}
+                  inputMode="numeric"
+                  placeholder="0"
+                  className="w-full rounded-xl bg-bg-panel card-border px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none"
+                />
+                <p className="mt-1.5 text-[11px] leading-snug text-white/40">
+                  There's no on-chain price quote for the bonding curve yet, so this can't be
+                  calculated for you from a slippage %. Leaving it at 0 means your initial buy
+                  accepts any output amount — set it manually if you want protection.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {statusText && submitting && (
+          <p className="mt-3 rounded-xl border border-accent-purple/30 bg-accent-purple/10 px-4 py-2.5 text-sm text-accent-purple">
+            {statusText}
+          </p>
+        )}
         {txError && (
           <p className="mt-3 rounded-xl border border-accent-red/30 bg-accent-red/10 px-4 py-2.5 text-sm text-accent-red">
             {txError}
