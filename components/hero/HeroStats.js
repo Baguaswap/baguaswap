@@ -1,12 +1,11 @@
 "use client";
 
-import { NETWORKS } from "@/lib/config";
-import { FlameIcon, ZapIcon, BridgeIcon, ShieldCheckIcon } from "@/components/icons";
+import { FlameIcon, ZapIcon, TrendingUpIcon, ShieldCheckIcon } from "@/components/icons";
 
 const HERO_STATS = [
   { id: "burned", label: "Burned", value: "Soon", icon: FlameIcon, live: false, tint: "text-accent-gold border-accent-gold/40" },
   { id: "gas", label: "Gas Sponsored", value: "Soon", icon: ZapIcon, live: false, tint: "text-accent-violet border-accent-purple/40" },
-  { id: "chains", label: "Chains", value: `${NETWORKS.length}`, icon: BridgeIcon, live: true, tint: "text-white/70 border-white/25" },
+  { id: "volume", label: "Volume", value: "Soon", icon: TrendingUpIcon, live: false, tint: "text-white/70 border-white/25" },
   { id: "assets", label: "Assets Protected", value: "Soon", icon: ShieldCheckIcon, live: false, tint: "text-accent-violet border-accent-purple/40" },
 ];
 
