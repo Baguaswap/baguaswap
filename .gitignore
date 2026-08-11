@@ -16,7 +16,6 @@ Thumbs.db
 .env.local
 .env*.local
 .env.*
-!.env.example
 *.pem
 
 # Node / Global Dependencies & Logs
