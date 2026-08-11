@@ -1,10 +1,10 @@
-import { FlameIcon } from "@/components/icons";
+import { FlameIcon, TrendingUpIcon } from "@/components/icons";
 
 const TOKENS = [
-  { symbol: "DBAGUA", name: "DOGE BAGUA", marketCap: "$128,450", liquidity: "$65,430", color: "#F5B324" },
-  { symbol: "PEIPEI", name: "PEIPEI", marketCap: "$97,220", liquidity: "$48,210", color: "#22C55E" },
-  { symbol: "WAGMI", name: "WAGMI", marketCap: "$76,890", liquidity: "$36,540", color: "#F5B324" },
-  { symbol: "MIAO", name: "MIAO", marketCap: "$55,670", liquidity: "$28,120", color: "#EF4444" },
+  { symbol: "DBAGUA", name: "DOGE BAGUA", price: "$0.0₄8214", change: "+42.6%", bondingProgress: 78, marketCap: "$128,450", liquidity: "$65,430", color: "#F5B324" },
+  { symbol: "PEIPEI", name: "PEIPEI", price: "$0.0₄6120", change: "+18.9%", bondingProgress: 61, marketCap: "$97,220", liquidity: "$48,210", color: "#22C55E" },
+  { symbol: "WAGMI", name: "WAGMI", price: "$0.0₅9884", change: "-4.3%", bondingProgress: 44, marketCap: "$76,890", liquidity: "$36,540", color: "#F5B324" },
+  { symbol: "MIAO", name: "MIAO", price: "$0.0₅5031", change: "-11.7%", bondingProgress: 22, marketCap: "$55,670", liquidity: "$28,120", color: "#EF4444" },
 ];
 
 function TokenAvatar({ label, color }) {
@@ -14,6 +14,37 @@ function TokenAvatar({ label, color }) {
       style={{ backgroundColor: color }}
     >
       {label.slice(0, 2)}
+    </div>
+  );
+}
+
+function PriceChange({ change }) {
+  const isPositive = !change.startsWith("-");
+  return (
+    <span
+      className={`flex items-center gap-0.5 text-[11px] font-semibold ${
+        isPositive ? "text-accent-green" : "text-accent-red"
+      }`}
+    >
+      <TrendingUpIcon width="11" height="11" className={isPositive ? "" : "rotate-180"} />
+      {change}
+    </span>
+  );
+}
+
+function BondingProgress({ value }) {
+  return (
+    <div className="mt-2">
+      <div className="flex items-center justify-between text-[10px] text-white/50">
+        <span>Bonding Curve</span>
+        <span className="font-medium text-white/80">{value}%</span>
+      </div>
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-accent-gold to-accent-purple"
+          style={{ width: `${value}%` }}
+        />
+      </div>
     </div>
   );
 }
@@ -39,12 +70,17 @@ export default function HotLaunchpad() {
           <div key={token.symbol} className="rounded-xl bg-bg-card card-border p-4">
             <div className="mb-2 flex items-start justify-between">
               <TokenAvatar label={token.symbol} color={token.color} />
-              <span className="rounded-md bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
-                New
+              <span className="rounded-md bg-accent-gold/15 px-2 py-0.5 text-[10px] font-medium text-accent-gold">
+                Hot
               </span>
             </div>
             <p className="font-display text-sm font-bold text-white">{token.name}</p>
             <p className="text-xs text-white/40">{token.symbol}</p>
+
+            <div className="mt-2 flex items-center justify-between">
+              <span className="text-sm font-semibold text-white">{token.price}</span>
+              <PriceChange change={token.change} />
+            </div>
 
             <div className="mt-2 space-y-1 text-xs">
               <div className="flex justify-between text-white/50">
@@ -56,6 +92,8 @@ export default function HotLaunchpad() {
                 <span className="text-white/80">{token.liquidity}</span>
               </div>
             </div>
+
+            <BondingProgress value={token.bondingProgress} />
 
             <button className="mt-3 w-full rounded-lg bg-accent-purple/15 py-2 text-xs font-semibold text-accent-violet hover:bg-accent-purple/25">
               Trade Now
