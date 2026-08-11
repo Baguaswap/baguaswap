@@ -1,11 +1,10 @@
 "use client";
 
 import { createContext, useContext, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BottomNav from "@/components/BottomNav";
-import LaunchMenu from "@/components/LaunchMenu";
 import ComingSoonModal from "@/components/ComingSoonModal";
 
 const PATH_TO_LABEL = {
@@ -27,30 +26,14 @@ export function useComingSoon() {
 
 export default function AppShell({ children }) {
   const pathname = usePathname();
-  const router = useRouter();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [comingSoonFeature, setComingSoonFeature] = useState(null);
-  const [launchMenuOpen, setLaunchMenuOpen] = useState(false);
 
   const activeTab = PATH_TO_LABEL[pathname] ?? "Home";
 
   const handleNavigate = (label) => {
-    if (label === "Launchpad") {
-      setLaunchMenuOpen(true);
-      return;
-    }
     setComingSoonFeature(label);
-  };
-
-  const handleLaunchMenuSelect = (option) => {
-    setLaunchMenuOpen(false);
-    if (option === "Create coin") {
-      setMenuOpen(false);
-      router.push("/launchpad");
-    } else {
-      setComingSoonFeature(option);
-    }
   };
 
   return (
@@ -67,12 +50,6 @@ export default function AppShell({ children }) {
         {children}
 
         <BottomNav active={activeTab} onSelect={handleNavigate} />
-
-        <LaunchMenu
-          open={launchMenuOpen}
-          onClose={() => setLaunchMenuOpen(false)}
-          onSelect={handleLaunchMenuSelect}
-        />
 
         <ComingSoonModal feature={comingSoonFeature} onClose={() => setComingSoonFeature(null)} />
       </main>
