@@ -15,7 +15,7 @@ const TABS = [
   { label: "Home", icon: HomeIcon, route: "/" },
   { label: "Discover", icon: CompassIcon, route: "/discover" },
   { label: "DEX Screener", icon: DexScreenerIcon, route: "/dex" },
-  { label: "Launchpad", icon: RocketIcon, route: null },
+  { label: "Launchpad", icon: RocketIcon, route: "/launchpad" },
   { label: "Swap", icon: SwapIcon, route: "/swap" },
   { label: "Liquidity", icon: DropletIcon, route: "/liquidity" },
   { label: "Wallet", icon: WalletIcon, route: "/wallet" },
