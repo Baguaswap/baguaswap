@@ -32,7 +32,7 @@ const NAV_ITEMS = [
   { label: "Discover", icon: CompassIcon, route: "/discover" },
   { label: "Swap", icon: SwapIcon, route: "/swap" },
   { label: "DEX Screener", icon: SearchIcon, route: "/dex", badge: "New" },
-  { label: "Launchpad", icon: RocketIcon, route: null },
+  { label: "Launchpad", icon: RocketIcon, route: "/launchpad" },
   { label: "Liquidity", icon: DropletIcon, route: "/liquidity" },
   { label: "Wallet", icon: WalletIcon, route: "/wallet" },
   { label: "Portfolio", icon: PieChartIcon, route: null, badge: "New" },
