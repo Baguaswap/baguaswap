@@ -6,10 +6,13 @@ import { useWallet } from "@/lib/WalletProvider";
 import { formatBalance, formatUsd } from "@/lib/format";
 import WalletConnectModal from "@/components/WalletConnectModal";
 import WalletPanelModal from "@/components/WalletPanelModal";
+import SendReceiveModal from "@/components/SendReceiveModal";
 
 export default function Header({ onOpenMenu, onComingSoon }) {
   const [walletConnectModalOpen, setWalletConnectModalOpen] = useState(false);
   const [walletPanelOpen, setWalletPanelOpen] = useState(false);
+  const [sendReceiveOpen, setSendReceiveOpen] = useState(false);
+  const [sendReceiveTab, setSendReceiveTab] = useState("Send");
   const {
     address,
     balance,
@@ -91,8 +94,22 @@ export default function Header({ onOpenMenu, onComingSoon }) {
           onClose={() => setWalletPanelOpen(false)}
           onAction={(action) => {
             setWalletPanelOpen(false);
-            onComingSoon?.(action);
+            if (action === "Deposit") {
+              setSendReceiveTab("Receive");
+              setSendReceiveOpen(true);
+            } else if (action === "Withdraw") {
+              setSendReceiveTab("Send");
+              setSendReceiveOpen(true);
+            } else {
+              onComingSoon?.(action);
+            }
           }}
+        />
+
+        <SendReceiveModal
+          open={sendReceiveOpen}
+          initialTab={sendReceiveTab}
+          onClose={() => setSendReceiveOpen(false)}
         />
       </header>
 
