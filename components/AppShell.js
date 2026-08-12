@@ -13,6 +13,7 @@ const PATH_TO_LABEL = {
   "/launchpad": "Launchpad",
   "/dex": "DEX Screener",
   "/wallet": "Wallet",
+  "/bridge": "Bridge",
   "/discover": "Discover",
   "/liquidity": "Liquidity",
   "/docs": "Docs",
