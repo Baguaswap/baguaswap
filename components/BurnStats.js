@@ -1,6 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useBurnStats, bucketBurnEvents } from "@/lib/burnStats";
+import { formatUsd, formatGroupedInt } from "@/lib/format";
+import { EXPLORER_URL, BUYBACK_BURN_ADDRESS } from "@/lib/config";
 
 const TIMEFRAMES = [
   { key: "1D", label: "1D" },
@@ -10,70 +13,19 @@ const TIMEFRAMES = [
   { key: "ALL", label: "ALL" },
 ];
 
-const TIMEFRAME_LABELS = {
-  "1D": ["09.00", "10.00", "11.00", "12.00", "13.00", "14.00", "15.00", "16.00", "Now"],
-  "1W": ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Ming"],
-  "1M": ["Minggu 1", "Minggu 2", "Minggu 3", "Minggu 4"],
-  "1Y": ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"],
-  ALL: ["2022", "2023", "2024", "2025", "2026"],
-};
-
-const TIMEFRAME_LABEL_STEP = {
-  "1D": 2,
-  "1W": 1,
-  "1M": 1,
-  "1Y": 3,
-  ALL: 1,
-};
-
-function hashSeed(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
-  }
-  return h >>> 0;
-}
-
-function mulberry32(seed) {
-  let s = seed;
-  return function () {
-    s |= 0;
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function generateBarData(timeframeKey) {
-  const labels = TIMEFRAME_LABELS[timeframeKey];
-  const step = TIMEFRAME_LABEL_STEP[timeframeKey];
-  const rand = mulberry32(hashSeed(timeframeKey));
-  let base = 4000 + rand() * 4000;
-
-  return labels.map((label, i) => {
-    base = Math.max(2000, base + (rand() - 0.35) * 9000);
-    return {
-      label,
-      value: Math.round(base),
-      showLabel: i % step === 0 || i === labels.length - 1,
-    };
-  });
-}
-
 function formatK(value) {
   if (value >= 1000) {
     const k = value / 1000;
     return `${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}K`;
   }
-  return `${value}`;
+  return `${Math.round(value)}`;
 }
 
 function BurnBarChart({ data }) {
   const w = 300;
   const h = 100;
   const padX = 4;
-  const maxValue = Math.max(...data.map((d) => d.value));
+  const maxValue = Math.max(1, ...data.map((d) => d.value));
   const ticks = [1, 0.75, 0.5, 0.25, 0].map((f) => Math.round(maxValue * f));
   const slot = (w - padX * 2) / data.length;
   const barWidth = Math.min(20, slot * 0.5);
@@ -133,7 +85,7 @@ function BurnBarChart({ data }) {
 
             {data.map((d, i) => {
               const cx = padX + slot * i + slot / 2;
-              const barH = Math.max((d.value / maxValue) * (h - 4), 2);
+              const barH = d.value > 0 ? Math.max((d.value / maxValue) * (h - 4), 2) : 0;
               return (
                 <g key={i} className="transition-opacity duration-200 hover:opacity-90">
                   {/* soft gold glow echo beneath the bar */}
@@ -188,52 +140,82 @@ function BurnBarChart({ data }) {
 
 export default function BurnStats() {
   const [timeframe, setTimeframe] = useState("1D");
-  const data = useMemo(() => generateBarData(timeframe), [timeframe]);
+  const { data, loading } = useBurnStats();
+  const chartData = useMemo(
+    () => bucketBurnEvents(data.events, timeframe, data.decimals),
+    [data.events, data.decimals, timeframe]
+  );
+
+  const detailsHref =
+    EXPLORER_URL && BUYBACK_BURN_ADDRESS ? `${EXPLORER_URL}/address/${BUYBACK_BURN_ADDRESS}` : null;
 
   return (
     <div className="rounded-xl bg-bg-card card-border p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="font-display font-bold text-white">$BAGUA Burn Stats</h3>
-        <a href="#" className="shrink-0 text-xs font-medium text-accent-purple">
-          View Details
-        </a>
+        <h3 className="font-display font-bold text-white">${data.symbol} Burn Stats</h3>
+        {detailsHref ? (
+          <a
+            href={detailsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 text-xs font-medium text-accent-purple"
+          >
+            View Detail
+          </a>
+        ) : null}
       </div>
 
-      <p className="text-xs text-white/50">Total Burned</p>
-      <p className="font-display text-2xl font-bold text-accent-gold">12,345,678</p>
+      {!data.configured ? (
+        <p className="text-xs text-white/40">Kontrak buyback &amp; burn belum dikonfigurasi.</p>
+      ) : (
+        <>
+          <p className="text-xs text-white/50">Total Burned</p>
+          <p className="font-display text-2xl font-bold text-accent-gold">
+            {loading ? "..." : formatGroupedInt(data.totalBurned)}
+          </p>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-        <div>
-          <p className="text-white/50">Burn Value (USD)</p>
-          <p className="font-semibold text-white">$30,245.67</p>
-        </div>
-        <div>
-          <p className="text-white/50">Last 24H Burned</p>
-          <p className="font-semibold text-accent-green">+345,678</p>
-        </div>
-      </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <p className="text-white/50">Burn Value (USD)</p>
+              <p className="font-semibold text-white">
+                {loading ? "..." : data.burnValueUsd != null ? formatUsd(data.burnValueUsd) : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-white/50">Last 24H Burned</p>
+              <p className="font-semibold text-accent-green">
+                {loading ? "..." : data.last24hBurned > 0 ? `+${formatGroupedInt(data.last24hBurned)}` : "0"}
+              </p>
+            </div>
+          </div>
 
-      <div className="mt-3 flex items-center justify-between">
-        <p className="text-xs font-medium text-white/60">$BAGUA Burn Activity</p>
-        <div className="flex gap-1 rounded-lg bg-black/20 p-0.5">
-          {TIMEFRAMES.map((tf) => (
-            <button
-              key={tf.key}
-              type="button"
-              onClick={() => setTimeframe(tf.key)}
-              className={`rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
-                tf.key === timeframe
-                  ? "bg-accent-gold text-bg"
-                  : "text-white/50 hover:text-white/80"
-              }`}
-            >
-              {tf.label}
-            </button>
-          ))}
-        </div>
-      </div>
+          <div className="mt-3 flex items-center justify-between">
+            <p className="text-xs font-medium text-white/60">${data.symbol} Burn Activity</p>
+            <div className="flex gap-1 rounded-lg bg-black/20 p-0.5">
+              {TIMEFRAMES.map((tf) => (
+                <button
+                  key={tf.key}
+                  type="button"
+                  onClick={() => setTimeframe(tf.key)}
+                  className={`rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
+                    tf.key === timeframe
+                      ? "bg-accent-gold text-bg"
+                      : "text-white/50 hover:text-white/80"
+                  }`}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      <BurnBarChart data={data} />
+          <BurnBarChart data={chartData} />
+
+          {!loading && data.events.length === 0 ? (
+            <p className="mt-2 text-center text-[11px] text-white/30">Belum ada burn tercatat.</p>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
