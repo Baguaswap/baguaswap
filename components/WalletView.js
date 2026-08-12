@@ -6,6 +6,7 @@ import { useWallet } from "@/lib/WalletProvider";
 import { CHAIN_NAME, ERC20_ABI, TOKEN_ADDRESS } from "@/lib/config";
 import { getReadProvider, getAmmPriceInEth, discoverLaunchpadHoldings } from "@/lib/pricing";
 import { formatBalance, formatUsd } from "@/lib/format";
+import SendReceiveModal from "@/components/SendReceiveModal";
 import {
   EyeIcon,
   EyeOffIcon,
@@ -76,6 +77,8 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
   const [hideBalance, setHideBalance] = useState(false);
   const [subTab, setSubTab] = useState("Tokens");
   const [query, setQuery] = useState("");
+  const [sendReceiveOpen, setSendReceiveOpen] = useState(false);
+  const [sendReceiveTab, setSendReceiveTab] = useState("Send");
 
   // Default already matches the on-chain symbol (BAG) so there's no
   // flash from a placeholder name while the contract call resolves.
@@ -148,6 +151,9 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
       onSwap?.();
     } else if (key === "Bridge") {
       onBridge?.();
+    } else if (key === "Send" || key === "Receive") {
+      setSendReceiveTab(key);
+      setSendReceiveOpen(true);
     } else {
       onComingSoon?.(key);
     }
@@ -502,6 +508,12 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
           pool or bonding-curve liquidity yet, and is excluded from Total Assets until then.
         </p>
       </div>
+
+      <SendReceiveModal
+        open={sendReceiveOpen}
+        initialTab={sendReceiveTab}
+        onClose={() => setSendReceiveOpen(false)}
+      />
     </section>
   );
 }
