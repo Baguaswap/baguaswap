@@ -1,32 +1,85 @@
-import { FlameIcon } from "@/components/icons";
+"use client";
 
-const BURNS = [
-  { address: "0x8a3f...c88", amount: "2,345 $BAGUA", time: "2m ago" },
-  { address: "0x71f2...c88", amount: "1,234 $BAGUA", time: "5m ago" },
-  { address: "0x9d1a...e321", amount: "5,678 $BAGUA", time: "12m ago" },
-];
+import { FlameIcon } from "@/components/icons";
+import { useBurnStats } from "@/lib/burnStats";
+import { formatGroupedInt, formatTimeAgo } from "@/lib/format";
+import { EXPLORER_URL, BUYBACK_BURN_ADDRESS } from "@/lib/config";
+
+const MAX_ROWS = 3;
+
+function shortenTx(hash) {
+  if (!hash) return "";
+  return `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+}
 
 export default function LatestBurns() {
+  const { data, loading } = useBurnStats();
+  const rows = data.events.slice(0, MAX_ROWS);
+  const viewAllHref =
+    EXPLORER_URL && BUYBACK_BURN_ADDRESS ? `${EXPLORER_URL}/address/${BUYBACK_BURN_ADDRESS}` : null;
+
   return (
     <div className="flex flex-col rounded-xl bg-bg-card card-border p-4">
       <h3 className="mb-3 font-display font-bold text-white">Latest Burns</h3>
 
       <div className="flex-1 space-y-3">
-        {BURNS.map((burn, i) => (
-          <div key={i} className="grid grid-cols-[1.3fr_1fr_0.7fr] items-center gap-2 text-xs">
-            <span className="flex items-center gap-2 truncate text-white/80">
-              <FlameIcon className="shrink-0 text-accent-gold" width="14" height="14" />
-              <span className="truncate">{burn.address}</span>
-            </span>
-            <span className="truncate text-white/60">{burn.amount}</span>
-            <span className="text-right text-white/40">{burn.time}</span>
-          </div>
-        ))}
+        {loading ? (
+          <p className="text-xs text-white/40">Memuat...</p>
+        ) : !data.configured ? (
+          <p className="text-xs text-white/40">Kontrak buyback &amp; burn belum dikonfigurasi.</p>
+        ) : rows.length === 0 ? (
+          <p className="text-xs text-white/40">Belum ada burn tercatat.</p>
+        ) : (
+          rows.map((burn) => {
+            const amount = formatGroupedInt(Number(burn.amountRaw) / 10 ** data.decimals);
+            const txHref = EXPLORER_URL ? `${EXPLORER_URL}/tx/${burn.txHash}` : null;
+            const row = (
+              <div className="grid grid-cols-[1.3fr_1fr_0.7fr] items-center gap-2 text-xs">
+                <span className="flex items-center gap-2 truncate text-white/80">
+                  <FlameIcon className="shrink-0 text-accent-gold" width="14" height="14" />
+                  <span className="truncate">{shortenTx(burn.txHash)}</span>
+                </span>
+                <span className="truncate text-white/60">
+                  {amount} ${data.symbol}
+                </span>
+                <span className="text-right text-white/40">{formatTimeAgo(burn.timestamp)}</span>
+              </div>
+            );
+            return txHref ? (
+              <a
+                key={burn.txHash}
+                href={txHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block hover:opacity-80"
+              >
+                {row}
+              </a>
+            ) : (
+              <div key={burn.txHash}>{row}</div>
+            );
+          })
+        )}
       </div>
 
-      <button className="mt-4 rounded-lg card-border py-2 text-xs font-semibold text-accent-violet hover:bg-white/5">
-        View All
-      </button>
+      {viewAllHref ? (
+        <a
+          href={viewAllHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-4 block rounded-lg card-border py-2 text-center text-xs font-semibold text-accent-violet hover:bg-white/5"
+        >
+          View All
+        </a>
+      ) : (
+        <button
+          type="button"
+          disabled
+          className="mt-4 rounded-lg card-border py-2 text-xs font-semibold text-white/30"
+        >
+          View All
+        </button>
+      )}
     </div>
   );
 }
