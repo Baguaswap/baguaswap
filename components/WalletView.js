@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Contract, JsonRpcProvider, formatUnits } from "ethers";
+import { Contract, formatUnits } from "ethers";
 import { useWallet } from "@/lib/WalletProvider";
-import { CHAIN_NAME, ERC20_ABI, RPC_URL, TOKEN_ADDRESS } from "@/lib/config";
+import { CHAIN_NAME, ERC20_ABI, TOKEN_ADDRESS } from "@/lib/config";
+import { getReadProvider, getAmmPriceInEth, discoverLaunchpadHoldings } from "@/lib/pricing";
 import { formatBalance, formatUsd } from "@/lib/format";
 import {
   EyeIcon,
@@ -66,6 +67,8 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
     usdPrice,
     usdChangePct,
     usdBalance,
+    portfolioChangePct,
+    recordPortfolioSnapshot,
     isOnGiwaChain,
     switchToGiwaChain,
   } = useWallet();
@@ -74,37 +77,71 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
   const [subTab, setSubTab] = useState("Tokens");
   const [query, setQuery] = useState("");
 
+  // Default already matches the on-chain symbol (BAG) so there's no
+  // flash from a placeholder name while the contract call resolves.
   const [bagBalance, setBagBalance] = useState(null);
-  const [bagSymbol, setBagSymbol] = useState("BAGUA");
+  const [bagSymbol, setBagSymbol] = useState("BAG");
+  const [bagPriceInEth, setBagPriceInEth] = useState(null);
 
-  const readProvider = useMemo(() => new JsonRpcProvider(RPC_URL), []);
+  const [launchpadHoldings, setLaunchpadHoldings] = useState([]);
+  const [launchpadLoading, setLaunchpadLoading] = useState(false);
+  const [launchpadScan, setLaunchpadScan] = useState({ total: 0, scanned: 0, skipped: false });
+
+  const readProvider = useMemo(() => getReadProvider(), []);
 
   const loadBagToken = useCallback(async () => {
     if (!TOKEN_ADDRESS) {
       setBagBalance(null);
+      setBagPriceInEth(null);
       return;
     }
     try {
       const token = new Contract(TOKEN_ADDRESS, ERC20_ABI, readProvider);
       const [symbol, decimals] = await Promise.all([
-        token.symbol().catch(() => "BAGUA"),
+        token.symbol().catch(() => "BAG"),
         token.decimals().catch(() => 18),
       ]);
       setBagSymbol(symbol);
+
       if (address) {
         const raw = await token.balanceOf(address);
         setBagBalance(formatUnits(raw, Number(decimals)));
       } else {
         setBagBalance(null);
       }
+
+      const price = await getAmmPriceInEth(readProvider, TOKEN_ADDRESS, Number(decimals));
+      setBagPriceInEth(price);
     } catch {
       setBagBalance(null);
+      setBagPriceInEth(null);
     }
   }, [address, readProvider]);
 
   useEffect(() => {
     loadBagToken();
   }, [loadBagToken]);
+
+  const loadLaunchpadHoldings = useCallback(async () => {
+    if (!address) {
+      setLaunchpadHoldings([]);
+      return;
+    }
+    setLaunchpadLoading(true);
+    try {
+      const { holdings, total, scanned, skipped } = await discoverLaunchpadHoldings(readProvider, address);
+      setLaunchpadHoldings(holdings);
+      setLaunchpadScan({ total, scanned, skipped });
+    } catch {
+      setLaunchpadHoldings([]);
+    } finally {
+      setLaunchpadLoading(false);
+    }
+  }, [address, readProvider]);
+
+  useEffect(() => {
+    loadLaunchpadHoldings();
+  }, [loadLaunchpadHoldings]);
 
   const handleAction = (key) => {
     if (key === "Swap") {
@@ -124,6 +161,27 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
     }
   };
 
+  const bagUsdPrice = bagPriceInEth != null && usdPrice != null ? bagPriceInEth * usdPrice : null;
+  const bagUsdValue = bagUsdPrice != null && bagBalance != null ? Number(bagBalance) * bagUsdPrice : null;
+
+  const launchpadTokens = useMemo(
+    () =>
+      launchpadHoldings.map((h) => {
+        const priceUsd = h.priceInEth != null && usdPrice != null ? h.priceInEth * usdPrice : null;
+        return {
+          symbol: h.symbol,
+          name: `Bagua Launchpad · ${h.graduated ? "Graduated" : "Bonding Curve"}`,
+          amount: h.balance,
+          usdValue: priceUsd != null ? Number(h.balance) * priceUsd : null,
+          hasPrice: priceUsd != null,
+          changePct: null,
+          kind: "diamond",
+          color: "#22C55E",
+        };
+      }),
+    [launchpadHoldings, usdPrice]
+  );
+
   const tokens = useMemo(
     () => [
       {
@@ -140,14 +198,15 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
         symbol: bagSymbol,
         name: "Bagua Ecosystem",
         amount: bagBalance,
-        usdValue: null,
-        hasPrice: false,
+        usdValue: bagUsdValue,
+        hasPrice: bagUsdValue != null,
         changePct: null,
         kind: "logo",
         color: "#F5B324",
       },
+      ...launchpadTokens,
     ],
-    [selectedNetwork, balance, usdBalance, usdPrice, usdChangePct, bagSymbol, bagBalance]
+    [selectedNetwork, balance, usdBalance, usdPrice, usdChangePct, bagSymbol, bagBalance, bagUsdValue, launchpadTokens]
   );
 
   const filteredTokens = tokens.filter((t) => {
@@ -156,8 +215,22 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
     return t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q);
   });
 
-  const totalAssetsDisplay = !address ? "—" : usdPrice == null ? "Loading…" : formatUsd(usdBalance);
-  const change24hDisplay = !address || usdChangePct == null ? "—" : formatPct(usdChangePct);
+  // Total portfolio value = every token above that actually has a price.
+  // This is what the 24H change is measured against — not just ETH's own
+  // price movement.
+  const totalUsdValue = useMemo(() => {
+    if (usdPrice == null) return null;
+    return tokens.reduce((sum, t) => sum + (t.usdValue || 0), 0);
+  }, [tokens, usdPrice]);
+
+  useEffect(() => {
+    if (address && totalUsdValue != null) {
+      recordPortfolioSnapshot(address, totalUsdValue);
+    }
+  }, [address, totalUsdValue, recordPortfolioSnapshot]);
+
+  const totalAssetsDisplay = !address ? "—" : totalUsdValue == null ? "Loading…" : formatUsd(totalUsdValue);
+  const change24hDisplay = !address || portfolioChangePct == null ? "—" : formatPct(portfolioChangePct);
   const holdingsDisplay = !address ? "—" : `${tokens.length} Tokens`;
 
   return (
@@ -199,11 +272,16 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
                 {hideBalance ? "••••••" : totalAssetsDisplay}
               </p>
               <div className="mt-1.5 flex items-center gap-2 text-sm">
-                <span className={`font-medium ${pctClass(usdChangePct)}`}>
+                <span className={`font-medium ${pctClass(portfolioChangePct)}`}>
                   {hideBalance ? "••••" : change24hDisplay}
                 </span>
                 <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/50">24H</span>
               </div>
+              {address && portfolioChangePct == null && (
+                <p className="mt-1 text-[11px] text-white/30">
+                  24H change needs a bit more history — check back after a day of use.
+                </p>
+              )}
               {!isOnGiwaChain && (
                 <button
                   onClick={switchToGiwaChain}
@@ -255,7 +333,13 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
               <span className="text-accent-purple">{bagSymbol}</span>
             </p>
             <p className="text-xs text-white/50">
-              {!address ? "Connect wallet to view" : "Not tracked by a price feed yet"}
+              {!address
+                ? "Connect wallet to view"
+                : hideBalance
+                ? "••••"
+                : bagUsdPrice != null
+                ? formatUsd(bagUsdValue)
+                : "Not priced yet"}
             </p>
           </div>
         </div>
@@ -316,7 +400,7 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
       ) : (
         <div className="mt-2 divide-y divide-bg-border">
           {filteredTokens.map((t) => (
-            <div key={t.symbol} className="grid grid-cols-[1.8fr_1.1fr_0.7fr_0.2fr] items-center gap-2 py-3">
+            <div key={`${t.symbol}-${t.name}`} className="grid grid-cols-[1.8fr_1.1fr_0.7fr_0.2fr] items-center gap-2 py-3">
               <div className="flex min-w-0 items-center gap-2.5">
                 <TokenAvatar token={t} />
                 <div className="min-w-0">
@@ -350,6 +434,15 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
           {filteredTokens.length === 0 && (
             <p className="py-6 text-center text-sm text-white/40">No tokens match your search.</p>
           )}
+
+          {launchpadLoading && (
+            <p className="py-3 text-center text-xs text-white/30">Scanning your launchpad tokens…</p>
+          )}
+          {!launchpadLoading && launchpadScan.skipped && (
+            <p className="py-3 text-center text-xs text-white/30">
+              Only checked the newest {launchpadScan.scanned} of {launchpadScan.total} launchpad tokens.
+            </p>
+          )}
         </div>
       )}
 
@@ -380,7 +473,7 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
           </div>
           <div>
             <p className="text-[11px] text-white/50">24H Change</p>
-            <p className={`text-sm font-semibold ${pctClass(usdChangePct)}`}>{change24hDisplay}</p>
+            <p className={`text-sm font-semibold ${pctClass(portfolioChangePct)}`}>{change24hDisplay}</p>
           </div>
           <div>
             <p className="text-[11px] text-white/50">Network</p>
@@ -403,8 +496,10 @@ export default function WalletView({ onComingSoon, onSwap, onBridge }) {
         </div>
 
         <p className="mt-3 text-[11px] leading-snug text-white/35">
-          All tracked tokens are listed above regardless of balance. {bagSymbol} isn&apos;t tracked by a price
-          feed yet, so it&apos;s shown by balance only and excluded from Total Assets.
+          24H Change reflects your wallet&apos;s total value 24 hours ago vs. now — it&apos;s built from
+          snapshots taken on this device, so it takes a day of use before it&apos;s available. Prices come
+          straight from Bagua&apos;s own on-chain pools; a token shows &quot;Not priced yet&quot; if it has no
+          pool or bonding-curve liquidity yet, and is excluded from Total Assets until then.
         </p>
       </div>
     </section>
