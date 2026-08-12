@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { BrowserProvider, Contract, parseEther } from "ethers";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BrowserProvider, Contract, JsonRpcProvider, formatUnits, parseEther } from "ethers";
 import { useWallet } from "@/lib/WalletProvider";
-import { FACTORY_ABI, FACTORY_ADDRESS, CHAIN_NAME } from "@/lib/config";
+import { FACTORY_ABI, FACTORY_ADDRESS, AMMS_ABI, AMMS_ADDRESS, CHAIN_NAME, RPC_URL } from "@/lib/config";
 import { uploadImageToIPFS, uploadMetadataToIPFS, cidToUri } from "@/lib/ipfs";
 import {
   RocketIcon,
@@ -75,6 +75,29 @@ function ToggleSwitch({ checked, onChange, disabled, label }) {
   );
 }
 
+// Replicates BaguaBondingCurve.getAmountOut()/_buy() exactly, in BigInt
+// (same truncating integer division as Solidity), for a token that
+// hasn't been created yet. A brand-new token is always registered with
+// realEthReserve = 0 and tokenReserveRemaining = TOKEN_SELL_SUPPLY, so
+// its starting curve state is identical for every launch — that's what
+// makes an accurate pre-creation quote possible at all.
+function quoteInitialBuy(curveConstants, ethAmountWei) {
+  if (!curveConstants || ethAmountWei <= 0n) return null;
+  const { virtualEth, virtualToken, tokenSellSupply, feeBps, k } = curveConstants;
+
+  const fee = (ethAmountWei * feeBps) / 10000n;
+  const ethIn = ethAmountWei - fee;
+
+  const newVEth = virtualEth + ethIn;
+  const newVToken = k / newVEth;
+  let tokensOut = virtualToken - newVToken;
+  if (tokensOut > tokenSellSupply) tokensOut = tokenSellSupply;
+
+  return { tokensOut, fee, ethIn };
+}
+
+const SLIPPAGE_PRESETS = ["0.5", "1", "5"];
+
 export default function LaunchpadView({ onComingSoon }) {
   const { address, connect, isOnGiwaChain, switchToGiwaChain } = useWallet();
 
@@ -90,16 +113,79 @@ export default function LaunchpadView({ onComingSoon }) {
   const [twitter, setTwitter] = useState("");
   const [telegram, setTelegram] = useState("");
   const [showSocials, setShowSocials] = useState(false);
-  const [pairWithBagua, setPairWithBagua] = useState(false);
   const [showInitialBuy, setShowInitialBuy] = useState(false);
   const [initialBuyEth, setInitialBuyEth] = useState("");
-  const [minTokensOut, setMinTokensOut] = useState("");
+  const [slippagePct, setSlippagePct] = useState("1");
+  const [customMinTokensOut, setCustomMinTokensOut] = useState("");
+  const [useCustomMinOut, setUseCustomMinOut] = useState(false);
+  const [curveConstants, setCurveConstants] = useState(null);
+  const [curveConstantsError, setCurveConstantsError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [statusText, setStatusText] = useState(null);
   const [txError, setTxError] = useState(null);
   const [txHash, setTxHash] = useState(null);
   const fileInputRef = useRef(null);
   const bannerInputRef = useRef(null);
+
+  // Fetch the bonding curve's public constants once (read-only, no wallet
+  // needed) so the initial-buy quote below can be computed live as the
+  // user types, per LAUNCHPAD_ARCHITECTURE.md section 26.
+  useEffect(() => {
+    if (!AMMS_ADDRESS) {
+      setCurveConstantsError(true);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const provider = new JsonRpcProvider(RPC_URL);
+        const curve = new Contract(AMMS_ADDRESS, AMMS_ABI, provider);
+        const [virtualEth, virtualToken, tokenSellSupply, k, feeBps] = await Promise.all([
+          curve.VIRTUAL_ETH_RESERVE(),
+          curve.VIRTUAL_TOKEN_RESERVE(),
+          curve.TOKEN_SELL_SUPPLY(),
+          curve.K(),
+          curve.tradingFeeBps(),
+        ]);
+        if (!cancelled) {
+          setCurveConstants({
+            virtualEth,
+            virtualToken: virtualToken + tokenSellSupply,
+            tokenSellSupply,
+            k,
+            feeBps,
+          });
+        }
+      } catch {
+        if (!cancelled) setCurveConstantsError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const quote = useMemo(() => {
+    if (!curveConstants || !initialBuyEth.trim()) return null;
+    let wei;
+    try {
+      wei = parseEther(initialBuyEth.trim());
+    } catch {
+      return null;
+    }
+    return quoteInitialBuy(curveConstants, wei);
+  }, [curveConstants, initialBuyEth]);
+
+  const estimatedTokensOutFormatted = quote ? formatUnits(quote.tokensOut, 18) : null;
+
+  const autoMinTokensOut = useMemo(() => {
+    if (!quote) return 0n;
+    const pct = Number(slippagePct);
+    if (!Number.isFinite(pct) || pct < 0) return 0n;
+    // tokensOut * (1 - pct/100), done in BigInt basis points to avoid float drift.
+    const bps = BigInt(Math.round(pct * 100)); // pct with 2 decimal precision
+    return (quote.tokensOut * (10000n - bps)) / 10000n;
+  }, [quote, slippagePct]);
 
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
@@ -130,9 +216,10 @@ export default function LaunchpadView({ onComingSoon }) {
     setWebsite("");
     setTwitter("");
     setTelegram("");
-    setPairWithBagua(false);
     setInitialBuyEth("");
-    setMinTokensOut("");
+    setSlippagePct("1");
+    setCustomMinTokensOut("");
+    setUseCustomMinOut(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (bannerInputRef.current) bannerInputRef.current.value = "";
   };
@@ -180,10 +267,17 @@ export default function LaunchpadView({ onComingSoon }) {
 
       const fee = await factory.creationFee().catch(() => 0n);
       const buyWei = initialBuyEth.trim() ? parseEther(initialBuyEth.trim()) : 0n;
-      // No on-chain quote function exists yet for the bonding curve (see
-      // config.js note), so we can't auto-derive minTokensOut from a %
-      // tolerance. An advanced manual value defaults to 0 (no protection).
-      const minOut = minTokensOut.trim() ? BigInt(minTokensOut.trim()) : 0n;
+      // Auto-derived from the live bonding-curve quote + chosen slippage
+      // tolerance (see quoteInitialBuy above). "Custom" lets an advanced
+      // user override with a raw token amount instead.
+      let minOut = 0n;
+      if (buyWei > 0n) {
+        if (useCustomMinOut) {
+          minOut = customMinTokensOut.trim() ? BigInt(customMinTokensOut.trim()) : 0n;
+        } else if (quote) {
+          minOut = autoMinTokensOut;
+        }
+      }
 
       setStatusText("Creating token on-chain…");
       const tx = await factory.createTokenAndBuy(name.trim(), symbol.trim(), metadataURI, minOut, {
@@ -395,23 +489,23 @@ export default function LaunchpadView({ onComingSoon }) {
           )}
         </div>
 
-        {/* Pair With Bagua */}
-        <div className="mt-3 flex items-center justify-between rounded-xl bg-bg-card card-border p-3">
+        {/* Pair With Bagua — not implemented on-chain yet: createTokenAndBuy()
+            has no parameter for it, so this can only be a UI preview until
+            the factory contract is redeployed with that option. */}
+        <div className="mt-3 flex items-center justify-between rounded-xl bg-bg-card card-border p-3 opacity-60">
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-purple/15 text-accent-purple">
               <FlameIcon width="18" height="18" />
             </span>
             <div>
-              <p className="text-sm font-semibold text-white">Pair With Bagua</p>
+              <p className="flex items-center gap-2 text-sm font-semibold text-white">
+                Pair With Bagua
+                <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-white/50">Soon</span>
+              </p>
               <p className="text-xs text-white/50">Launch your token&apos;s liquidity paired with $BAGUA instead of ETH.</p>
             </div>
           </div>
-          <ToggleSwitch
-            checked={pairWithBagua}
-            onChange={setPairWithBagua}
-            disabled={submitting}
-            label="Pair With Bagua"
-          />
+          <ToggleSwitch checked={false} onChange={() => {}} disabled label="Pair With Bagua (coming soon)" />
         </div>
 
         {/* Initial buy (optional) */}
@@ -443,24 +537,72 @@ export default function LaunchpadView({ onComingSoon }) {
                   placeholder="0.0"
                   className="w-full rounded-xl bg-bg-panel card-border px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none"
                 />
+                {initialBuyEth.trim() && (
+                  <p className="mt-1.5 text-xs text-white/50">
+                    {quote
+                      ? <>≈ {Number(estimatedTokensOutFormatted).toLocaleString(undefined, { maximumFractionDigits: 0 })} {symbol || "tokens"} <span className="text-white/30">(estimate, from the curve&apos;s starting price)</span></>
+                      : curveConstantsError
+                      ? "Couldn't reach the network to estimate tokens — you can still buy, just without a preview."
+                      : "Calculating estimate…"}
+                  </p>
+                )}
               </div>
-              <div>
-                <label className="mb-1.5 block text-xs text-white/50">
-                  Minimum tokens received (advanced, optional)
-                </label>
-                <input
-                  value={minTokensOut}
-                  onChange={(e) => setMinTokensOut(e.target.value.replace(/[^0-9]/g, ""))}
-                  inputMode="numeric"
-                  placeholder="0"
-                  className="w-full rounded-xl bg-bg-panel card-border px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none"
-                />
-                <p className="mt-1.5 text-[11px] leading-snug text-white/40">
-                  There&apos;s no on-chain price quote for the bonding curve yet, so this can&apos;t be
-                  calculated for you from a slippage %. Leaving it at 0 means your initial buy
-                  accepts any output amount — set it manually if you want protection.
-                </p>
-              </div>
+
+              {initialBuyEth.trim() && quote && (
+                <div>
+                  <label className="mb-1.5 block text-xs text-white/50">Slippage tolerance</label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {SLIPPAGE_PRESETS.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => {
+                          setUseCustomMinOut(false);
+                          setSlippagePct(p);
+                        }}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+                          !useCustomMinOut && slippagePct === p
+                            ? "bg-accent-purple text-white"
+                            : "bg-bg-panel card-border text-white/60"
+                        }`}
+                      >
+                        {p}%
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setUseCustomMinOut(true)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+                        useCustomMinOut ? "bg-accent-purple text-white" : "bg-bg-panel card-border text-white/60"
+                      }`}
+                    >
+                      Custom
+                    </button>
+                  </div>
+
+                  {useCustomMinOut ? (
+                    <div className="mt-2">
+                      <label className="mb-1.5 block text-xs text-white/50">Minimum tokens received (raw amount)</label>
+                      <input
+                        value={customMinTokensOut}
+                        onChange={(e) => setCustomMinTokensOut(e.target.value.replace(/[^0-9]/g, ""))}
+                        inputMode="numeric"
+                        placeholder="0"
+                        className="w-full rounded-xl bg-bg-panel card-border px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none"
+                      />
+                      <p className="mt-1.5 text-[11px] leading-snug text-white/40">
+                        Leaving this at 0 accepts any output amount — no slippage protection.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-1.5 text-[11px] leading-snug text-white/40">
+                      Your buy reverts if you&apos;d receive less than{" "}
+                      {Number(formatUnits(autoMinTokensOut, 18)).toLocaleString(undefined, { maximumFractionDigits: 0 })} tokens
+                      (estimate minus {slippagePct}%).
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
