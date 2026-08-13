@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BrowserProvider, Contract, JsonRpcProvider, formatUnits, parseEther } from "ethers";
+import { BrowserProvider, Contract, formatUnits, parseEther } from "ethers";
 import { useWallet } from "@/lib/WalletProvider";
-import { FACTORY_ABI, FACTORY_ADDRESS, AMMS_ABI, AMMS_ADDRESS, CHAIN_NAME, RPC_URL } from "@/lib/config";
+import { FACTORY_ABI, FACTORY_ADDRESS, AMMS_ABI, AMMS_ADDRESS, CHAIN_NAME } from "@/lib/config";
+import { getReadProvider } from "@/lib/pricing";
 import { uploadImageToIPFS, uploadMetadataToIPFS, cidToUri } from "@/lib/ipfs";
 import {
   RocketIcon,
@@ -138,7 +139,7 @@ export default function LaunchpadView({ onComingSoon }) {
     let cancelled = false;
     (async () => {
       try {
-        const provider = new JsonRpcProvider(RPC_URL);
+        const provider = getReadProvider();
         const curve = new Contract(AMMS_ADDRESS, AMMS_ABI, provider);
         const [virtualEth, virtualToken, tokenSellSupply, k, feeBps] = await Promise.all([
           curve.VIRTUAL_ETH_RESERVE(),
