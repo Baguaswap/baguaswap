@@ -3,6 +3,40 @@
 import { useRouter } from "next/navigation";
 import { FlameIcon, TrendingUpIcon } from "@/components/icons";
 import { HOT_LAUNCHPAD_TOKENS } from "@/lib/mockLaunchpadTokens";
+import { formatCompactNumber, formatGroupedInt } from "@/lib/format";
+
+// If two tokens' 24h volumes sit within this fraction of each other
+// (default 5%), treat them as "mepet" (too close to call on volume alone)
+// and let 24h transaction count (buy+sell) decide instead. This keeps a
+// coin that's being traded by lots of wallets from losing its spot just
+// because another coin got one big whale buy.
+const VOLUME_TIE_THRESHOLD = 0.05;
+
+// Only the top N coins after sorting get the "Hot" badge.
+const HOT_BADGE_COUNT = 2;
+
+function getTxCount24h(token) {
+  return (token.buyCount24h ?? 0) + (token.sellCount24h ?? 0);
+}
+
+// Sort by 24h volume (desc). When two tokens' volumes are within
+// VOLUME_TIE_THRESHOLD of each other, break the tie with 24h tx count
+// (desc) instead.
+function sortByVolumeThenActivity(tokens) {
+  return [...tokens].sort((a, b) => {
+    const volA = a.volume24h ?? 0;
+    const volB = b.volume24h ?? 0;
+    const maxVol = Math.max(volA, volB) || 1;
+    const relDiff = Math.abs(volA - volB) / maxVol;
+
+    if (relDiff <= VOLUME_TIE_THRESHOLD) {
+      const txDiff = getTxCount24h(b) - getTxCount24h(a);
+      if (txDiff !== 0) return txDiff;
+    }
+
+    return volB - volA;
+  });
+}
 
 function TokenAvatar({ label, color }) {
   return (
@@ -48,6 +82,7 @@ function BondingProgress({ value }) {
 
 export default function HotLaunchpad() {
   const router = useRouter();
+  const sortedTokens = sortByVolumeThenActivity(HOT_LAUNCHPAD_TOKENS);
 
   return (
     <section className="mx-4 mt-6">
@@ -57,7 +92,7 @@ export default function HotLaunchpad() {
             <FlameIcon className="text-accent-gold" />
             Hot Launchpad
           </h2>
-          <p className="text-xs text-white/50">Newest meme coins on Bagua Swap</p>
+          <p className="text-xs text-white/50">Ranked by 24h volume &amp; trading activity</p>
         </div>
         <a href="#" className="text-sm font-medium text-accent-purple">
           View All
@@ -65,7 +100,7 @@ export default function HotLaunchpad() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {HOT_LAUNCHPAD_TOKENS.map((token) => (
+        {sortedTokens.map((token, index) => (
           <button
             key={token.symbol}
             onClick={() => router.push(`/coin/launchpad/${token.contractAddress}`)}
@@ -73,19 +108,28 @@ export default function HotLaunchpad() {
           >
             <div className="mb-2 flex items-start justify-between">
               <TokenAvatar label={token.symbol} color={token.avatarColor} />
-              <span className="rounded-md bg-accent-gold/15 px-2 py-0.5 text-[10px] font-medium text-accent-gold">
-                Hot
-              </span>
+              {index < HOT_BADGE_COUNT && (
+                <span className="rounded-md bg-accent-gold/15 px-2 py-0.5 text-[10px] font-medium text-accent-gold">
+                  Hot
+                </span>
+              )}
             </div>
             <p className="font-display text-sm font-bold text-white">{token.name}</p>
             <p className="text-xs text-white/40">{token.symbol}</p>
-
             <div className="mt-2 flex items-center justify-between">
               <span className="text-sm font-semibold text-white">{token.price}</span>
               <PriceChange change={token.change} />
             </div>
-
             <div className="mt-2 space-y-1 text-xs">
+              <div className="flex justify-between text-white/50">
+                <span>24h Vol</span>
+                <span className="text-white/80">
+                  ${formatCompactNumber(token.volume24h)}{" "}
+                  <span className="text-white/40">
+                    · {formatGroupedInt(getTxCount24h(token))} txns
+                  </span>
+                </span>
+              </div>
               <div className="flex justify-between text-white/50">
                 <span>Market Cap</span>
                 <span className="text-white/80">{token.marketCap}</span>
@@ -95,9 +139,7 @@ export default function HotLaunchpad() {
                 <span className="text-white/80">{token.liquidity}</span>
               </div>
             </div>
-
             <BondingProgress value={token.bondingProgress} />
-
             <span className="mt-3 block w-full rounded-lg bg-accent-purple/15 py-2 text-center text-xs font-semibold text-accent-violet">
               Trade Now
             </span>
