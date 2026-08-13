@@ -1,14 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import { useLaunchpadPriceHistory } from "@/lib/launchpadChart";
+import { useEffect, useState } from "react";
+import { useLaunchpadPriceHistory, CHART_INTERVALS, pickDefaultIntervalKey } from "@/lib/launchpadChart";
 import { formatCompactNumber, formatTinyPrice } from "@/lib/format";
 import { SwapIcon } from "@/components/icons";
 import CoinCandlestickChart from "@/components/CoinCandlestickChart";
 
+// Market cap / price header (switchable), 24h change + ATH gauge, a
+// timeframe switcher, and the candlestick chart, for the Launchpad coin
+// detail page. No buy button here on purpose — this section is read-only
+// market info.
 export default function CoinMarketPanel({ address }) {
-  const { data, loading } = useLaunchpadPriceHistory(address);
-  const [viewMode, setViewMode] = useState("mcap");
+  const [viewMode, setViewMode] = useState("mcap"); // "mcap" | "price"
+
+  // null until the token's actual age is known, so the very first render
+  // doesn't flash a fixed default before snapping to the age-appropriate
+  // one. Once set, it's fully user-controlled from the row below.
+  const [interval, setIntervalState] = useState(null);
+  const { data, loading } = useLaunchpadPriceHistory(address, interval ?? "15m");
+
+  useEffect(() => {
+    if (interval == null && data?.launchMs) {
+      setIntervalState(pickDefaultIntervalKey(Date.now() - data.launchMs));
+    }
+  }, [interval, data?.launchMs]);
 
   if (loading && !data) {
     return (
@@ -62,7 +77,23 @@ export default function CoinMarketPanel({ address }) {
         <span className="shrink-0 text-xs text-white/40">ATH ${formatCompactNumber(athMarketCapUsd)}</span>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+        {CHART_INTERVALS.map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setIntervalState(key)}
+            className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+              (interval ?? "15m") === key
+                ? "bg-accent-green/15 text-accent-green"
+                : "text-white/40"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-2">
         <CoinCandlestickChart data={candles} />
       </div>
     </div>
