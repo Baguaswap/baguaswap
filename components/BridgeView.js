@@ -9,12 +9,12 @@ import {
   EXPLORER_URL,
   GIWA_L1_STANDARD_BRIDGE_ABI,
   GIWA_L1_STANDARD_BRIDGE_ADDRESS,
-  RPC_URL,
   SEPOLIA_CHAIN_ID,
   SEPOLIA_EXPLORER_URL,
   SEPOLIA_NETWORK,
   SEPOLIA_RPC_URL,
 } from "@/lib/config";
+import { getReadProvider } from "@/lib/pricing";
 import { formatBalance, formatUsd } from "@/lib/format";
 import {
   ArrowDownIcon,
@@ -57,7 +57,7 @@ export default function BridgeView({ onComingSoon }) {
   const isOnSepolia = chainId === SEPOLIA_CHAIN_ID;
 
   const sepoliaReadProvider = useMemo(() => new JsonRpcProvider(SEPOLIA_RPC_URL), []);
-  const giwaReadProvider = useMemo(() => new JsonRpcProvider(RPC_URL), []);
+  const giwaReadProvider = useMemo(() => getReadProvider(), []);
 
   const loadSepoliaBalance = useCallback(async () => {
     if (!address) {
