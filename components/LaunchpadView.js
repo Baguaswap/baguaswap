@@ -15,6 +15,7 @@ import {
   XSocialIcon,
   TelegramIcon,
 } from "@/components/icons";
+import BuyAtLaunchModal from "@/components/BuyAtLaunchModal";
 
 // Uploads the logo (and banner, if provided) to IPFS, then builds and
 // uploads the metadata JSON, per LAUNCHPAD_ARCHITECTURE.md sections 3-8.
@@ -114,7 +115,6 @@ export default function LaunchpadView({ onComingSoon }) {
   const [twitter, setTwitter] = useState("");
   const [telegram, setTelegram] = useState("");
   const [showSocials, setShowSocials] = useState(false);
-  const [showInitialBuy, setShowInitialBuy] = useState(false);
   const [initialBuyEth, setInitialBuyEth] = useState("");
   const [slippagePct, setSlippagePct] = useState("1");
   const [customMinTokensOut, setCustomMinTokensOut] = useState("");
@@ -125,6 +125,7 @@ export default function LaunchpadView({ onComingSoon }) {
   const [statusText, setStatusText] = useState(null);
   const [txError, setTxError] = useState(null);
   const [txHash, setTxHash] = useState(null);
+  const [showBuyModal, setShowBuyModal] = useState(false);
   const fileInputRef = useRef(null);
   const bannerInputRef = useRef(null);
 
@@ -188,6 +189,23 @@ export default function LaunchpadView({ onComingSoon }) {
     return (quote.tokensOut * (10000n - bps)) / 10000n;
   }, [quote, slippagePct]);
 
+  const isValidBuyAmount = useMemo(() => {
+    if (!initialBuyEth.trim()) return false;
+    try {
+      return parseEther(initialBuyEth.trim()) > 0n;
+    } catch {
+      return false;
+    }
+  }, [initialBuyEth]);
+
+  // The buy popup is now the only path into token creation (see
+  // handlePrimaryButton / BuyAtLaunchModal below), so close it
+  // automatically once creation succeeds — the existing "Token
+  // created" message below the button takes over from there.
+  useEffect(() => {
+    if (txHash) setShowBuyModal(false);
+  }, [txHash]);
+
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -245,6 +263,11 @@ export default function LaunchpadView({ onComingSoon }) {
       return;
     }
 
+    if (!isValidBuyAmount) {
+      setTxError("Enter an initial buy amount greater than 0 — every launch requires the creator to buy in first.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const metadataURI = await buildMetadataURI(
@@ -299,7 +322,25 @@ export default function LaunchpadView({ onComingSoon }) {
   const handlePrimaryButton = () => {
     if (!address) return connect();
     if (!isOnGiwaChain) return switchToGiwaChain();
-    return handleCreate();
+
+    setTxError(null);
+    if (!name.trim() || !symbol.trim()) {
+      setTxError("Enter a token name and symbol first.");
+      return;
+    }
+    if (!imageFile) {
+      setTxError("Upload a token image first — it's required per the metadata spec.");
+      return;
+    }
+    if (!FACTORY_ADDRESS) {
+      setTxError("Factory contract address isn't configured yet. Set NEXT_PUBLIC_FACTORY_ADDRESS after redeploying.");
+      return;
+    }
+
+    // Base fields are valid — hand off to the mandatory buy-at-launch
+    // popup. handleCreate() (Pinata upload + createTokenAndBuy) only
+    // ever runs from that popup's Confirm button now.
+    setShowBuyModal(true);
   };
 
   const primaryLabel = !address
@@ -509,111 +550,32 @@ export default function LaunchpadView({ onComingSoon }) {
           <ToggleSwitch checked={false} onChange={() => {}} disabled label="Pair With Bagua (coming soon)" />
         </div>
 
-        {/* Initial buy (optional) */}
-        <div className="mt-3 rounded-xl bg-bg-card card-border p-3">
-          <button
-            type="button"
-            onClick={() => setShowInitialBuy((v) => !v)}
-            className="flex w-full items-center justify-between text-sm text-white/70"
-          >
-            <span className="flex items-center gap-2">
-              <RocketIcon width="16" height="16" />
-              Buy tokens at launch <span className="text-white/30">(Optional)</span>
-            </span>
-            <ChevronDownIcon
-              width="16"
-              height="16"
-              className={`transition-transform ${showInitialBuy ? "rotate-180" : ""}`}
-            />
-          </button>
-
-          {showInitialBuy && (
-            <div className="mt-3 space-y-3">
-              <div>
-                <label className="mb-1.5 block text-xs text-white/50">Initial buy amount (ETH)</label>
-                <input
-                  value={initialBuyEth}
-                  onChange={(e) => setInitialBuyEth(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="0.0"
-                  className="w-full rounded-xl bg-bg-panel card-border px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none"
-                />
-                {initialBuyEth.trim() && (
-                  <p className="mt-1.5 text-xs text-white/50">
-                    {quote
-                      ? <>≈ {Number(estimatedTokensOutFormatted).toLocaleString(undefined, { maximumFractionDigits: 0 })} {symbol || "tokens"} <span className="text-white/30">(estimate, from the curve&apos;s starting price)</span></>
-                      : curveConstantsError
-                      ? "Couldn't reach the network to estimate tokens — you can still buy, just without a preview."
-                      : "Calculating estimate…"}
-                  </p>
-                )}
-              </div>
-
-              {initialBuyEth.trim() && quote && (
-                <div>
-                  <label className="mb-1.5 block text-xs text-white/50">Slippage tolerance</label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {SLIPPAGE_PRESETS.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => {
-                          setUseCustomMinOut(false);
-                          setSlippagePct(p);
-                        }}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
-                          !useCustomMinOut && slippagePct === p
-                            ? "bg-accent-purple text-white"
-                            : "bg-bg-panel card-border text-white/60"
-                        }`}
-                      >
-                        {p}%
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setUseCustomMinOut(true)}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
-                        useCustomMinOut ? "bg-accent-purple text-white" : "bg-bg-panel card-border text-white/60"
-                      }`}
-                    >
-                      Custom
-                    </button>
-                  </div>
-
-                  {useCustomMinOut ? (
-                    <div className="mt-2">
-                      <label className="mb-1.5 block text-xs text-white/50">Minimum tokens received (raw amount)</label>
-                      <input
-                        value={customMinTokensOut}
-                        onChange={(e) => setCustomMinTokensOut(e.target.value.replace(/[^0-9]/g, ""))}
-                        inputMode="numeric"
-                        placeholder="0"
-                        className="w-full rounded-xl bg-bg-panel card-border px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none"
-                      />
-                      <p className="mt-1.5 text-[11px] leading-snug text-white/40">
-                        Leaving this at 0 accepts any output amount — no slippage protection.
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="mt-1.5 text-[11px] leading-snug text-white/40">
-                      Your buy reverts if you&apos;d receive less than{" "}
-                      {Number(formatUnits(autoMinTokensOut, 18)).toLocaleString(undefined, { maximumFractionDigits: 0 })} tokens
-                      (estimate minus {slippagePct}%).
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+        {/* Buy at launch — mandatory now, via BuyAtLaunchModal. This
+            static row just states the requirement; the actual amount
+            is entered in the popup that opens from the primary button. */}
+        <div className="mt-3 flex items-center gap-3 rounded-xl bg-bg-card card-border p-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-purple/15 text-accent-purple">
+            <RocketIcon width="18" height="18" />
+          </span>
+          <div>
+            <p className="flex items-center gap-2 text-sm font-semibold text-white">
+              Buy tokens at launch
+              <span className="rounded-md bg-accent-purple/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-purple">
+                Required
+              </span>
+            </p>
+            <p className="text-xs text-white/50">
+              Every launch requires the creator to buy in first — you&apos;ll set the amount in the next step.
+            </p>
+          </div>
         </div>
 
-        {statusText && submitting && (
+        {statusText && submitting && !showBuyModal && (
           <p className="mt-3 rounded-xl border border-accent-purple/30 bg-accent-purple/10 px-4 py-2.5 text-sm text-accent-purple">
             {statusText}
           </p>
         )}
-        {txError && (
+        {txError && !showBuyModal && (
           <p className="mt-3 rounded-xl border border-accent-red/30 bg-accent-red/10 px-4 py-2.5 text-sm text-accent-red">
             {txError}
           </p>
@@ -636,6 +598,29 @@ export default function LaunchpadView({ onComingSoon }) {
           Deploys on {CHAIN_NAME} • Takes a few seconds
         </p>
       </div>
+
+      <BuyAtLaunchModal
+        open={showBuyModal}
+        onClose={() => setShowBuyModal(false)}
+        onConfirm={handleCreate}
+        symbol={symbol}
+        initialBuyEth={initialBuyEth}
+        setInitialBuyEth={setInitialBuyEth}
+        quote={quote}
+        estimatedTokensOutFormatted={estimatedTokensOutFormatted}
+        curveConstantsError={curveConstantsError}
+        slippagePct={slippagePct}
+        setSlippagePct={setSlippagePct}
+        useCustomMinOut={useCustomMinOut}
+        setUseCustomMinOut={setUseCustomMinOut}
+        customMinTokensOut={customMinTokensOut}
+        setCustomMinTokensOut={setCustomMinTokensOut}
+        autoMinTokensOut={autoMinTokensOut}
+        isValidAmount={isValidBuyAmount}
+        submitting={submitting}
+        statusText={statusText}
+        txError={txError}
+      />
     </section>
   );
 }
