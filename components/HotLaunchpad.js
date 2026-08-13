@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FlameIcon, TrendingUpIcon } from "@/components/icons";
 import { useHotLaunchpadTokens } from "@/lib/hotLaunchpad";
-import { formatCompactNumber, formatTxCount, formatTinyPrice } from "@/lib/format";
+import { formatCompactNumber, formatTxCount, formatTinyPrice, formatTokenAge } from "@/lib/format";
 
 // If two tokens' 24h volumes sit within this fraction of each other
 // (default 5%), treat them as "mepet" (too close to call on volume alone)
@@ -12,8 +13,9 @@ import { formatCompactNumber, formatTxCount, formatTinyPrice } from "@/lib/forma
 // because another coin got one big whale buy.
 const VOLUME_TIE_THRESHOLD = 0.05;
 
-// Only the top N coins after sorting get the "Hot" badge.
-const HOT_BADGE_COUNT = 2;
+// Hot Launchpad on the Home tab only ever shows coins that carry the "Hot"
+// badge — i.e. the top N by 24h volume/activity — capped at 4 cards.
+const HOT_BADGE_COUNT = 4;
 
 function getTxCount24h(token) {
   return (token.buyCount24h ?? 0) + (token.sellCount24h ?? 0);
@@ -50,10 +52,27 @@ function colorFromAddress(address) {
   return `hsl(${hue}, 65%, 55%)`;
 }
 
-function TokenAvatar({ label, color }) {
+// Shows the token's uploaded image (resolved from its on-chain
+// metadataURI -> IPFS JSON -> gateway URL by lib/hotLaunchpad.js) when
+// available, falling back to the letter avatar if there's no image yet or
+// the image URL fails to load (e.g. gateway hiccup).
+function TokenAvatar({ label, color, image }) {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  if (image && !imageFailed) {
+    return (
+      <img
+        src={image}
+        alt=""
+        className="h-12 w-12 shrink-0 rounded-full object-cover"
+        onError={() => setImageFailed(true)}
+      />
+    );
+  }
+
   return (
     <div
-      className="flex h-12 w-12 items-center justify-center rounded-full text-sm font-bold text-bg"
+      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-bold text-bg"
       style={{ backgroundColor: color }}
     >
       {label.slice(0, 2)}
@@ -61,9 +80,25 @@ function TokenAvatar({ label, color }) {
   );
 }
 
-function PriceChange({ change }) {
+// Live "Xs / Xm / Xh / Xd" age counter shown in place of the old static
+// "New" label — ticks every second so it counts up in real time while the
+// card is on screen.
+function TokenAge({ createdAtMs }) {
+  const [label, setLabel] = useState(() => formatTokenAge(createdAtMs));
+
+  useEffect(() => {
+    setLabel(formatTokenAge(createdAtMs));
+    if (createdAtMs == null) return undefined;
+    const id = setInterval(() => setLabel(formatTokenAge(createdAtMs)), 1000);
+    return () => clearInterval(id);
+  }, [createdAtMs]);
+
+  return <span className="text-[11px] font-semibold text-white/40">{label ?? "—"}</span>;
+}
+
+function PriceChange({ change, createdAtMs }) {
   if (change == null) {
-    return <span className="text-[11px] font-semibold text-white/40">New</span>;
+    return <TokenAge createdAtMs={createdAtMs} />;
   }
   const isPositive = change >= 0;
   const label = `${isPositive ? "+" : ""}${change.toFixed(1)}%`;
@@ -109,7 +144,9 @@ function HotLaunchpadSkeleton() {
 export default function HotLaunchpad() {
   const router = useRouter();
   const { data, loading } = useHotLaunchpadTokens();
-  const sortedTokens = sortByVolumeThenActivity(data.tokens);
+  // Only coins that carry the "Hot" badge ever appear here, capped at
+  // HOT_BADGE_COUNT (4) cards — see the constant above.
+  const hotTokens = sortByVolumeThenActivity(data.tokens).slice(0, HOT_BADGE_COUNT);
 
   return (
     <section className="mx-4 mt-6">
@@ -132,25 +169,27 @@ export default function HotLaunchpad() {
         <div className="rounded-xl bg-bg-card card-border p-4 text-center text-sm text-white/50">
           Launchpad contracts aren&apos;t configured yet.
         </div>
-      ) : sortedTokens.length === 0 ? (
+      ) : hotTokens.length === 0 ? (
         <div className="rounded-xl bg-bg-card card-border p-4 text-center text-sm text-white/50">
           No tokens have been launched yet.
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {sortedTokens.map((token, index) => (
+          {hotTokens.map((token) => (
             <button
               key={token.contractAddress}
               onClick={() => router.push(`/coin/launchpad/${token.contractAddress}`)}
               className="rounded-xl bg-bg-card card-border p-4 text-left"
             >
               <div className="mb-2 flex items-start justify-between">
-                <TokenAvatar label={token.symbol} color={colorFromAddress(token.contractAddress)} />
-                {index < HOT_BADGE_COUNT && (
-                  <span className="rounded-md bg-accent-gold/15 px-2 py-0.5 text-[10px] font-medium text-accent-gold">
-                    Hot
-                  </span>
-                )}
+                <TokenAvatar
+                  label={token.symbol}
+                  color={colorFromAddress(token.contractAddress)}
+                  image={token.avatarImage}
+                />
+                <span className="rounded-md bg-accent-gold/15 px-2 py-0.5 text-[10px] font-medium text-accent-gold">
+                  Hot
+                </span>
               </div>
               <p className="font-display text-sm font-bold text-white">{token.name}</p>
               <p className="text-xs text-white/40">{token.symbol}</p>
@@ -158,7 +197,7 @@ export default function HotLaunchpad() {
                 <span className="text-sm font-semibold text-white">
                   {token.priceUsd != null ? formatTinyPrice(token.priceUsd) : "—"}
                 </span>
-                <PriceChange change={token.change} />
+                <PriceChange change={token.change} createdAtMs={token.createdAtMs} />
               </div>
               <div className="mt-2 space-y-1 text-xs">
                 <div className="flex justify-between text-white/50">
