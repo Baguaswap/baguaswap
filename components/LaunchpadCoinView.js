@@ -8,16 +8,11 @@ import {
   ShareIcon,
   GlobeIcon,
   XSocialIcon,
+  TelegramIcon,
   CheckCircleIcon,
   ClockIcon,
 } from "@/components/icons";
-
-// Full-page coin detail for Launchpad tokens, at /coin/launchpad/[address].
-// This intentionally only renders the "basic info" block at the top (avatar,
-// name/ticker, chain, creator, share, contract address, socials) — the rest
-// of the page is left blank for now, to be designed later (chart, trades,
-// comments, etc.). The DEX-side coin page will get its own, different
-// layout later and does NOT reuse this component.
+import CoinMarketPanel from "@/components/CoinMarketPanel";
 
 function truncateAddress(address) {
   if (!address) return "";
@@ -33,7 +28,6 @@ function CopyRow({ label, value }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Clipboard not available — ignore silently.
     }
   };
 
@@ -100,6 +94,7 @@ export default function LaunchpadCoinView({ token, address, loading = false }) {
     contractAddress,
     website,
     twitter,
+    telegram,
     createdAgo,
   } = token;
 
@@ -116,7 +111,6 @@ export default function LaunchpadCoinView({ token, address, loading = false }) {
         await navigator.clipboard.writeText(shareData.url);
       }
     } catch {
-      // User cancelled share or clipboard unavailable — ignore silently.
     }
   };
 
@@ -124,7 +118,6 @@ export default function LaunchpadCoinView({ token, address, loading = false }) {
     <section className="mx-4 mt-4 pb-6">
       <BackButton onClick={() => router.back()} />
 
-      {/* Basic info — the only section designed so far */}
       <div className="mt-4 rounded-2xl bg-bg-panel card-border p-5">
         <div className="flex items-start gap-3">
           {avatarImage ? (
@@ -177,7 +170,7 @@ export default function LaunchpadCoinView({ token, address, loading = false }) {
           </div>
         )}
 
-        {(website || twitter) && (
+        {(website || telegram || twitter) && (
           <div className="mt-2 flex items-center gap-2">
             {website && (
               <a
@@ -188,6 +181,17 @@ export default function LaunchpadCoinView({ token, address, loading = false }) {
               >
                 <GlobeIcon width="14" height="14" />
                 Website
+              </a>
+            )}
+            {telegram && (
+              <a
+                href={telegram}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-bg-card card-border py-2.5 text-xs font-medium text-white/70"
+              >
+                <TelegramIcon width="14" height="14" />
+                Telegram
               </a>
             )}
             {twitter && (
@@ -205,8 +209,7 @@ export default function LaunchpadCoinView({ token, address, loading = false }) {
         )}
       </div>
 
-      {/* Intentionally left blank for now — chart, trading panel, activity,
-          comments, etc. go here once that part of the design is ready. */}
+      {contractAddress && <CoinMarketPanel address={contractAddress} />}
     </section>
   );
 }
