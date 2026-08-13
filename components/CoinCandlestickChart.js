@@ -25,8 +25,11 @@ function computePriceFormat(data) {
 
   const leadingZeros = Math.max(0, Math.floor(-Math.log10(min)));
   const precision = Math.min(10, leadingZeros + 4);
-  const minMove = Number((1 / 10 ** precision).toFixed(precision));
-  return { type: "price", precision, minMove };
+  // `base` (an exact power of ten) instead of `minMove` (a float like
+  // 0.000000001) — lightweight-charts v5 added `base` specifically to
+  // avoid floating-point rounding at this kind of precision, which is
+  // exactly the range bonding-curve prices live in here.
+  return { type: "price", precision, base: 10 ** precision };
 }
 
 // Renders candles with TradingView's own charting library (lightweight-charts)
@@ -57,7 +60,20 @@ export default function CoinCandlestickChart({ data = [], height = 260 }) {
           horzLines: { color: "rgba(255,255,255,0.04)" },
         },
         rightPriceScale: { borderColor: "#1E1E24" },
-        timeScale: { borderColor: "#1E1E24", timeVisible: true, secondsVisible: false },
+        // maxBarSpacing caps how wide fitContent() is allowed to stretch each
+        // candle. Without it, the library's default cap is half the chart's
+        // pixel width — so a brand-new coin with only 1-2 trades (1-2
+        // candles total) renders as one giant colored block filling half
+        // the chart instead of a normal-looking thin candle with empty
+        // space around it. This is the "block chart" bug: it's not
+        // corrupted data, just unbounded auto-zoom on sparse data.
+        timeScale: {
+          borderColor: "#1E1E24",
+          timeVisible: true,
+          secondsVisible: false,
+          barSpacing: 8,
+          maxBarSpacing: 28,
+        },
         crosshair: { mode: CrosshairMode.Normal },
       });
 
