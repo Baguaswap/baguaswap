@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BrowserProvider, Contract, JsonRpcProvider, formatUnits, parseEther, parseUnits } from "ethers";
+import { BrowserProvider, Contract, formatUnits, parseEther, parseUnits } from "ethers";
 import { useWallet } from "@/lib/WalletProvider";
-import { AMMS_ABI, AMMS_ADDRESS, CHAIN_NAME, ERC20_ABI, RPC_URL, TOKEN_ADDRESS } from "@/lib/config";
+import { AMMS_ABI, AMMS_ADDRESS, CHAIN_NAME, ERC20_ABI, TOKEN_ADDRESS } from "@/lib/config";
+import { getReadProvider } from "@/lib/pricing";
 import {
   ArrowDownIcon,
   ChevronDownIcon,
@@ -39,7 +40,7 @@ export default function SwapView({ onComingSoon }) {
   const [txError, setTxError] = useState(null);
   const [txHash, setTxHash] = useState(null);
 
-  const readProvider = useMemo(() => new JsonRpcProvider(RPC_URL), []);
+  const readProvider = useMemo(() => getReadProvider(), []);
 
   const loadTokenInfo = useCallback(async () => {
     try {
