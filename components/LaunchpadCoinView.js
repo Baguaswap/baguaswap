@@ -66,8 +66,17 @@ function BackButton({ onClick }) {
   );
 }
 
-export default function LaunchpadCoinView({ token, address }) {
+export default function LaunchpadCoinView({ token, address, loading = false }) {
   const router = useRouter();
+
+  if (loading) {
+    return (
+      <section className="mx-4 mt-4 pb-6">
+        <BackButton onClick={() => router.back()} />
+        <div className="mt-4 h-40 animate-pulse rounded-2xl bg-bg-panel card-border" />
+      </section>
+    );
+  }
 
   if (!token) {
     return (
